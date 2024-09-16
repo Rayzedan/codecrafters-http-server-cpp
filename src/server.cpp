@@ -232,9 +232,7 @@ private:
 };
 
 std::string parse_request(const std::string& request) {
-    std::cout << "RAW REQUEST: " << request << std::endl;
     HttpRequest req(request);
-    std::cout << "REQUEST: " << req << std::endl;
     return req.Execute();
 }
 
