@@ -4,9 +4,53 @@
 #include <iostream>
 #include <netdb.h>
 #include <string>
+#include <sstream>
+#include <vector>
+#include <array>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+constexpr std::array headers = { "test_example.html"};
+
+std::string handle_get_request(const std::string& method, const std::string& target) {
+    if (method == "GET") {
+        if (target == "/") {
+            return "HTTP/1.1 200 OK\r\n\r\n";
+        }
+        for (const std::string_view& header : headers) {
+            if (header == target) {
+                return "HTTP/1.1 200 OK\r\nContent-Length: " +
+                    std::to_string(header.size()) + "\r\n\r\n";
+            }
+        }
+        return "HTTP/1.1 404 Not Found\r\n\r\n";
+    }
+    return "HTTP/1.1 200 OK\r\n\r\n";
+}
+
+std::string handle_request(const std::vector<std::string>& tokens)
+{
+    if (tokens.size() < 2)
+    {
+        return "HTTP/1.1 404 Not Found\r\n\r\n";
+    }
+    return handle_get_request(tokens[0], tokens[1]);
+}
+
+std::string parse_request(const std::string& request) {
+    auto idx = request.find_first_of("\r\n");
+    if (idx != std::string::npos) {
+        std::istringstream ss(request.substr(0, idx));
+        std::vector<std::string> tokens;
+        std::string token;
+        while (ss >> token) {
+            tokens.push_back(token);
+        }
+        return handle_request(tokens);
+    }
+    return {};
+}
 
 int main(int argc, char** argv)
 {
@@ -60,10 +104,18 @@ int main(int argc, char** argv)
     std::cout << "Waiting for a client to connect...\n";
 
     int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, (socklen_t*)&client_addr_len);
+    if (client_fd < 0)
+    {
+        std::cerr << "accept failed\n";
+        return 1;
+    }
     std::cout << "Client connected\n";
-    const std::string ok_response = "HTTP/1.1 200 OK\r\n\r\n";
-    send(client_fd, ok_response.c_str(), ok_response.size(), 0);
+    std::string request;
+    request.resize(1024);
+    ssize_t bytes_read = recv(client_fd, request.data(), request.size() - 1, 0);
+    parse_request(request);
+    const std::string response = parse_request(request);
+    send(client_fd, response.c_str(), response.size(), 0);
     close(server_fd);
-
     return 0;
 }
