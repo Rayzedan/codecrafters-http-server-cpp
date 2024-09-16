@@ -13,83 +13,175 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+static const std::string g_ok_response = "HTTP/1.1 200 OK\r\n\r\n";
+static const std::string g_not_found_response = "HTTP/1.1 404 Not Found\r\n\r\n";
+static const std::string g_server_error_response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+
+static const std::unordered_set<std::string> headers = { "test_example.html" };
+
+
+
+struct RootHandler {
+    static std::string Handle(const std::string& text) {
+        if (text.empty()) {
+            return g_ok_response;
+        }
+        if (headers.find(text) == headers.end()) {
+            return g_not_found_response;
+        }
+        //TODO: impl headers searching
+        return g_ok_response;
+    }
+};
+
 struct EchoHandler {
     static std::string Handle(const std::string& text) {
-        std::cout << "Here" << std::endl;
         return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " +
             std::to_string(text.size()) + "\r\n\r\n" + text;
     }
 };
 
-static const std::unordered_set<std::string> headers = { "test_example.html" };
-
-static std::map<std::string, std::function<std::string(const std::string&)>> g_handler_map = {
-    {"echo", EchoHandler::Handle} // Указатель на статический метод
+static std::map<std::string, std::function<std::string(const std::string&)>> g_router_map =
+{
+    {"echo", EchoHandler::Handle},
+    {"User-Agent", EchoHandler::Handle}
 };
 
-static const std::string ok_response = "HTTP/1.1 200 OK\r\n\r\n";
-static const std::string not_found_response = "HTTP/1.1 404 Not Found\r\n\r\n";
-
-
-std::string handle_endpoints(const std::string& endpoint)
+class RequestStatus
 {
-    std::istringstream ss(endpoint);
-    std::vector<std::string> tokens;
-    std::string token;
-    while (std::getline(ss, token, '/'))
+public:
+    RequestStatus() = default;
+    RequestStatus(const std::string& parsed_request)
     {
-        tokens.push_back(token);
+        std::istringstream ss(parsed_request);
+        ss >> m_method;
+        ss >> m_target;
+        ss >> m_version;
     }
-    switch (tokens.size()) {
-        case 0:
-            return not_found_response;
-        case 1: {
-            return tokens[0].empty() ? ok_response : not_found_response;
-        }
-        case 2: {
-            if (headers.find(tokens[1]) != headers.end()) {
-                return ok_response;
-            }
-            return not_found_response;
-        }
-        default: {
-            auto handler = g_handler_map.find(tokens[1]);
-            if (handler != g_handler_map.end()) {
-                return handler->second(tokens[2]);
-            }
-        }
-    }
-    return not_found_response;
-}
-
-std::string handle_get_request(const std::string& method, const std::string& target) {
-    if (method == "GET") {
-        return handle_endpoints(target);
-    }
-    return "HTTP/1.1 200 OK\r\n\r\n";
-}
-
-std::string handle_request(const std::vector<std::string>& tokens)
-{
-    if (tokens.size() < 2)
+    std::string Execute()
     {
-        return "HTTP/1.1 404 Not Found\r\n\r\n";
+        if (m_method == "GET")
+        {
+            std::istringstream ss(m_target);
+            std::vector<std::string> tokens;
+            std::string token;
+            while (std::getline(ss, token, '/'))
+            {
+                tokens.push_back(token);
+            }
+            switch (tokens.size()) {
+                case 0:
+                    return g_server_error_response;
+                case 1:
+                    return g_ok_response;
+                case 2:
+                    return RootHandler::Handle(tokens[1]);
+                default:
+                    const std::string& path = tokens[1];
+                    auto route = g_router_map.find(path);
+                    if (route != g_router_map.end())
+                    {
+                        return route->second(tokens[2]);
+                    }
+                    return g_not_found_response;
+            }
+        }
+        return g_server_error_response;
     }
-    return handle_get_request(tokens[0], tokens[1]);
-}
+    friend std::ostream& operator<<(std::ostream& os, RequestStatus requestLine)
+    {
+        os << "Method: " << requestLine.m_method << std::endl;
+        os << "Target: " << requestLine.m_target << std::endl;
+        os << "Version: " << requestLine.m_version << std::endl;
+        return os;
+    }
+
+private:
+    std::string m_method;
+    std::string m_target;
+    std::string m_version;
+};
+
+class HttpResponse {
+public:
+    HttpResponse() = default;
+    HttpResponse(const std::string& responseCode, const std::string& responseBody = "") : m_response_code(responseCode), m_response_body(responseBody)
+    {}
+
+    std::string str() const {
+        return m_response_code + m_response_body;
+    }
+private:
+    std::string m_response_code;
+    std::string m_response_body;
+};
+
+class HttpRequest {
+public:
+    HttpRequest(const std::string& rawRequest)
+    {
+        if (!rawRequest.empty())
+        {
+            auto idx = rawRequest.find_first_of("\r\n");
+            if (idx == std::string::npos) {
+                throw std::runtime_error("Error while parsing HTTP method");
+            }
+            m_request_line = RequestStatus(rawRequest.substr(0, idx));
+            m_headers = ParseHeaders(rawRequest.substr(idx + 2));
+        }
+    }
+
+    std::string Execute() {
+        for (const auto& router : g_router_map) {
+            if (m_headers.find(router.first) != m_headers.end()) {
+                return router.second(m_headers[router.first]);
+            }
+        }
+        return m_request_line.Execute();
+    }
+    friend std::ostream& operator<<(std::ostream& os, const HttpRequest& request)
+    {
+        os << request.m_request_line;
+        return os;
+    }
+
+private:
+    //TODO: separate to diff function
+    std::map<std::string, std::string> ParseHeaders(const std::string& headers)
+    {
+        std::map<std::string, std::string> headers_map;
+        size_t start = 0;
+        size_t end;
+        while ((end = headers.find("\r\n", start)) != std::string::npos)
+        {
+            std::string header = headers.substr(start, end - start);
+            if (header.empty())
+            {
+                break;
+            }
+            size_t colon_idx = header.find(':');
+            if (colon_idx == std::string::npos)
+            {
+                throw std::runtime_error("Invalid header format: no colon found");
+            }
+            std::string key = header.substr(0, colon_idx);
+            std::string value = header.substr(colon_idx + 1);
+            value.erase(0, value.find_first_not_of(" \t"));
+            headers_map[key] = value;
+            start = end + 2;
+        }
+        return headers_map;
+    }
+
+private:
+    RequestStatus m_request_line;
+    std::map<std::string, std::string> m_headers;
+    std::string m_body;
+};
 
 std::string parse_request(const std::string& request) {
-    auto idx = request.find_first_of("\r\n");
-    if (idx != std::string::npos) {
-        std::istringstream ss(request.substr(0, idx));
-        std::vector<std::string> tokens;
-        std::string token;
-        while (ss >> token) {
-            tokens.push_back(token);
-        }
-        return handle_request(tokens);
-    }
-    return {};
+    HttpRequest req(request);
+    return req.Execute();
 }
 
 int main(int argc, char** argv)
@@ -155,7 +247,7 @@ int main(int argc, char** argv)
     ssize_t bytes_read = recv(client_fd, request.data(), request.size() - 1, 0);
     parse_request(request);
     const std::string response = parse_request(request);
-    std::cout << "response - " << response << std::endl;
+    // std::cout << "response - " << response << std::endl;
     send(client_fd, response.data(), response.size(), 0);
     close(server_fd);
     return 0;
