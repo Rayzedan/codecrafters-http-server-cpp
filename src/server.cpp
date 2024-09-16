@@ -11,6 +11,7 @@
 #include <sstream>
 #include <thread>
 #include <vector>
+#include <fstream>
 #include <unordered_set>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -19,7 +20,7 @@
 static const std::string g_ok_response = "HTTP/1.1 200 OK\r\n\r\n";
 static const std::string g_not_found_response = "HTTP/1.1 404 Not Found\r\n\r\n";
 static const std::string g_server_error_response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-
+static std::string g_dir_path;
 static const std::unordered_set<std::string> headers = { "test_example.html" };
 
 constexpr int g_port = 4221;
@@ -45,10 +46,30 @@ struct EchoHandler {
     }
 };
 
+struct FileHandler {
+    static std::string Handle(const std::string& path) {
+        if (g_dir_path.empty()) {
+            return g_not_found_response;
+        }
+        std::ifstream fs(g_dir_path + '/' + path);
+        if (!fs.is_open()) {
+            return g_not_found_response;
+        }
+        std::string result;
+        std::string temp;
+        while (fs >> temp) {
+            result.append(temp);
+        }
+        return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " +
+            std::to_string(result.size()) + "\r\n\r\n" + result;
+    }
+};
+
 static std::map<std::string, std::function<std::string(const std::string&)>> g_router_map =
 {
     {"echo", EchoHandler::Handle},
-    {"User-Agent", EchoHandler::Handle}
+    {"User-Agent", EchoHandler::Handle},
+    {"files", FileHandler::Handle}
 };
 
 class RequestStatus
@@ -91,6 +112,18 @@ public:
             }
         }
         return g_server_error_response;
+    }
+    std::string GetMethod() const
+    {
+        return m_method;
+    }
+    std::string GetTarget() const
+    {
+        return m_target;
+    }
+    std::string GetVersion() const
+    {
+        return m_version;
     }
     friend std::ostream& operator<<(std::ostream& os, RequestStatus requestLine)
     {
@@ -135,22 +168,22 @@ public:
         }
     }
 
-    std::string Execute() {
+    std::string Execute()
+    {
         for (const auto& router : g_router_map) {
-            if (m_headers.find(router.first) != m_headers.end()) {
-                std::cout << "Router: " << router.first << std::endl;
-                std::cout << "Check: " << m_headers[router.first] << std::endl;
+            if (m_headers.find(m_request_line.GetTarget()) != m_headers.end() &&
+                m_headers.find(router.first) != m_headers.end()) {
                 return router.second(m_headers[router.first]);
             }
         }
         return m_request_line.Execute();
     }
+
     friend std::ostream& operator<<(std::ostream& os, const HttpRequest& request)
     {
         os << request.m_request_line;
         return os;
     }
-
 private:
     //TODO: separate to diff function
     std::map<std::string, std::string> ParseHeaders(const std::string& headers)
@@ -192,12 +225,10 @@ std::string parse_request(const std::string& request) {
 
 std::mutex request_mutex;
 
-// Функция для обработки клиента
 void handle_client(int client_fd)
 {
     std::string request;
     request.resize(1024);
-
     ssize_t bytes_read = recv(client_fd, request.data(), request.size() - 1, 0);
     if (bytes_read < 0)
     {
@@ -205,17 +236,10 @@ void handle_client(int client_fd)
         close(client_fd);
         return;
     }
-
-    request[bytes_read] = '\0'; // Завершаем строку
-    std::cout << "get request - " << request << std::endl;
-
-    // Здесь должна быть ваша функция обработки запроса
+    request[bytes_read] = '\0';
     const std::string response =
-        parse_request(request); // Предполагается, что эта функция определена
-    std::cout << "response: " << response << std::endl;
-
+        parse_request(request);
     send(client_fd, response.data(), response.size(), 0);
-
     close(client_fd);
 }
 
@@ -224,7 +248,9 @@ int main(int argc, char** argv)
     // Flush after every std::cout / std::cerr
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
-
+    if (argc > 1) {
+        g_dir_path = std::string(argv[2]);
+    }
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0)
     {
