@@ -46,22 +46,30 @@ struct EchoHandler {
     }
 };
 
-struct FileHandler {
-    static std::string Handle(const std::string& path) {
-        if (g_dir_path.empty()) {
+struct FileHandler
+{
+    static std::string Handle(const std::string& path)
+    {
+        if (g_dir_path.empty())
+        {
             return g_not_found_response;
         }
-        std::ifstream fs(g_dir_path + '/' + path);
-        if (!fs.is_open()) {
+        std::ifstream fs(g_dir_path + '/' + path, std::ios::binary | std::ios::ate);
+        if (!fs.is_open())
+        {
+            std::cerr << "Failed to open file" << std::endl;
             return g_not_found_response;
         }
-        std::string result;
-        std::string temp;
-        while (fs >> temp) {
-            result.append(temp);
-        }
-        return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " +
-            std::to_string(result.size()) + "\r\n\r\n" + result;
+        std::streampos size = fs.tellg();
+        fs.seekg(0, std::ios::beg);
+
+        std::string response;
+        std::string fileContent((std::istreambuf_iterator<char>(fs)),
+            std::istreambuf_iterator<char>());
+        response += fileContent;
+        return "HTTP/1.1 200 OK\r\nContent-Type: "
+            "application/octet-stream\r\nContent-Length: " +
+            std::to_string(size) + "\r\n\r\n" + response;
     }
 };
 
@@ -170,9 +178,10 @@ public:
 
     std::string Execute()
     {
-        for (const auto& router : g_router_map) {
-            if (m_headers.find(m_request_line.GetTarget()) != m_headers.end() &&
-                m_headers.find(router.first) != m_headers.end()) {
+        for (const auto& router : g_router_map)
+        {
+            if (m_headers.find(router.first) != m_headers.end())
+            {
                 return router.second(m_headers[router.first]);
             }
         }
@@ -182,6 +191,10 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const HttpRequest& request)
     {
         os << request.m_request_line;
+        for (const auto& header : request.m_headers)
+        {
+            os << header.first << ": " << header.second << std::endl;
+        }
         return os;
     }
 private:
@@ -219,7 +232,9 @@ private:
 };
 
 std::string parse_request(const std::string& request) {
+    std::cout << "RAW REQUEST: " << request << std::endl;
     HttpRequest req(request);
+    std::cout << "REQUEST: " << req << std::endl;
     return req.Execute();
 }
 
