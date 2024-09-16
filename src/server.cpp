@@ -1,30 +1,70 @@
 #include <arpa/inet.h>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <map>
 #include <iostream>
 #include <netdb.h>
 #include <string>
 #include <sstream>
 #include <vector>
-#include <array>
+#include <unordered_set>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-constexpr std::array headers = { "test_example.html"};
+struct EchoHandler {
+    static std::string Handle(const std::string& text) {
+        std::cout << "Here" << std::endl;
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " +
+            std::to_string(text.size()) + "\r\n\r\n" + text;
+    }
+};
+
+static const std::unordered_set<std::string> headers = { "test_example.html" };
+
+static std::map<std::string, std::function<std::string(const std::string&)>> g_handler_map = {
+    {"echo", EchoHandler::Handle} // Указатель на статический метод
+};
+
+static const std::string ok_response = "HTTP/1.1 200 OK\r\n\r\n";
+static const std::string not_found_response = "HTTP/1.1 404 Not Found\r\n\r\n";
+
+
+std::string handle_endpoints(const std::string& endpoint)
+{
+    std::istringstream ss(endpoint);
+    std::vector<std::string> tokens;
+    std::string token;
+    while (std::getline(ss, token, '/'))
+    {
+        tokens.push_back(token);
+    }
+    switch (tokens.size()) {
+        case 0:
+            return not_found_response;
+        case 1: {
+            return tokens[0].empty() ? ok_response : not_found_response;
+        }
+        case 2: {
+            if (headers.find(tokens[1]) != headers.end()) {
+                return ok_response;
+            }
+            return not_found_response;
+        }
+        default: {
+            auto handler = g_handler_map.find(tokens[1]);
+            if (handler != g_handler_map.end()) {
+                return handler->second(tokens[2]);
+            }
+        }
+    }
+    return not_found_response;
+}
 
 std::string handle_get_request(const std::string& method, const std::string& target) {
     if (method == "GET") {
-        if (target == "/") {
-            return "HTTP/1.1 200 OK\r\n\r\n";
-        }
-        for (const std::string_view& header : headers) {
-            if (header == target) {
-                return "HTTP/1.1 200 OK\r\nContent-Length: " +
-                    std::to_string(header.size()) + "\r\n\r\n";
-            }
-        }
-        return "HTTP/1.1 404 Not Found\r\n\r\n";
+        return handle_endpoints(target);
     }
     return "HTTP/1.1 200 OK\r\n\r\n";
 }
@@ -115,7 +155,8 @@ int main(int argc, char** argv)
     ssize_t bytes_read = recv(client_fd, request.data(), request.size() - 1, 0);
     parse_request(request);
     const std::string response = parse_request(request);
-    send(client_fd, response.c_str(), response.size(), 0);
+    std::cout << "response - " << response << std::endl;
+    send(client_fd, response.data(), response.size(), 0);
     close(server_fd);
     return 0;
 }
