@@ -72,7 +72,7 @@ private:
         response.SetContentLength(file.size());
         auto encoding = headers.find("Accept-Encoding");
         //TODO: add encoding to server ctx
-        if (encoding != headers.end() && encoding->second == "gzip")
+        if (encoding != headers.end() && encoding->second.find("gzip") != std::string::npos)
         {
             response.SetEncoding("gzip");
         }
@@ -97,7 +97,8 @@ struct EchoHandler
             response.SetContentType("text/plain");
             const auto& headers = request.GetHeaders();
             auto encoding = headers.find("Accept-Encoding");
-            if (encoding != headers.end() && encoding->second == "gzip")
+            if (encoding != headers.end() &&
+                encoding->second.find("gzip") != std::string::npos)
             {
                 response.SetEncoding("gzip");
             }
@@ -126,7 +127,8 @@ struct UserAgentHandler
             response.SetContentType("text/plain");
             response.SetContentLength(userAgent->second.size());
             auto encoding = headers.find("Accept-Encoding");
-            if (encoding != headers.end() && encoding->second == "gzip")
+            if (encoding != headers.end() &&
+                encoding->second.find("gzip") != std::string::npos)
             {
                 response.SetEncoding("gzip");
             }
@@ -160,7 +162,8 @@ struct HtmlHandler
         response.SetContentLength(data.size());
         const auto& headers = request.GetHeaders();
         auto encoding = headers.find("Accept-Encoding");
-        if (encoding != headers.end() && encoding->second == "gzip")
+        if (encoding != headers.end() &&
+            encoding->second.find("gzip") != std::string::npos)
         {
             response.SetEncoding("gzip");
         }
