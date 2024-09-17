@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include <cstring>
 #include <fstream>
 #include <getopt.h>
 #include <iostream>
@@ -79,4 +80,40 @@ std::map<t_server_ctx, std::string> parse_args(int argc, char** argv)
         }
     }
     return args;
+}
+
+std::string compress(const std::string& content)
+{
+    z_stream zs;
+    memset(&zs, 0, sizeof(zs));
+    if (deflateInit2(&zs, Z_BEST_COMPRESSION, Z_DEFLATED, 15 + 16, 8,
+            Z_DEFAULT_STRATEGY) != Z_OK)
+    {
+        throw std::runtime_error("deflateInit2 failed while compressing.");
+    }
+    zs.next_in = (Bytef*)content.data();
+    zs.avail_in = content.size();
+    int ret;
+    char outbuffer[32768];
+    std::string out;
+    do
+    {
+        zs.next_out = reinterpret_cast<Bytef*>(outbuffer);
+        zs.avail_out = sizeof(outbuffer);
+        ret = deflate(&zs, Z_FINISH);
+        if (out.size() < zs.total_out)
+        {
+            out.append(outbuffer, zs.total_out - out.size());
+        }
+
+    } while (ret == Z_OK);
+
+    deflateEnd(&zs);
+
+    if (ret != Z_STREAM_END)
+    {
+        throw std::runtime_error("Exception during zlib compression: (" + std::to_string(ret) + ") " + zs.msg);
+    }
+
+    return out;
 }

@@ -2,6 +2,8 @@
 #define HTTP_RESPONSE_HPP
 
 #include "http_request.hpp"
+#include "common.hpp"
+#include <zlib.h>
 #include <string>
 #include <map>
 
@@ -21,8 +23,9 @@ public:
     HttpResponse(t_response_answer type, t_http_version version) : m_type(type), m_version(version)
     {
     }
-    std::string str() const
+    std::string str()
     {
+        PrepareBody();
         std::stringstream ss;
         ss << to_string(m_version) << ' ' << to_string(m_type) << "\r\n";
         for (const auto& line : m_headers)
@@ -52,6 +55,16 @@ public:
     {
         m_body = body;
     }
+private:
+    void PrepareBody()
+    {
+        if (m_headers.find("Content-Encoding") != m_headers.end() && !m_body.empty())
+        {
+            m_body = compress(m_body);
+            SetContentLength(m_body.size());
+        }
+    }
+
 private:
     t_response_answer m_type;
     t_http_version m_version;
