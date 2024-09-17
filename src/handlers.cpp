@@ -10,73 +10,80 @@ static const std::unordered_set<std::string> g_headers = {"test_example.html"};
 
 struct RootHandler
 {
-    static std::string Handle(const HttpRequest& request, const ServerContext& ctx)
+    static HttpResponse Handle(const HttpRequest& request, const ServerContext& ctx)
     {
         const auto& status = request.GetStatus();
         if (status.GetMethod() == t_request_type::RT_GET)
         {
-            return g_ok_response;
+            return HttpResponse(t_response_answer::RT_OK, t_http_version::HV_1_1);
         }
-        return g_server_error_response;
+        return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
     }
 };
 
 struct FileHandler
 {
-    static std::string Handle(const HttpRequest& request, const ServerContext& ctx)
+    static HttpResponse Handle(const HttpRequest& request, const ServerContext& ctx)
     {
         const std::string& path = ctx.GetDirectory();
         const auto& status = request.GetStatus();
         const auto& target = status.GetTarget();
         if (path.empty() || target.size() < 4)
         {
-            return g_not_found_response;
+            return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
         }
         switch (status.GetMethod())
         {
             case t_request_type::RT_POST:
                 return handle_post(path + '/' + target[3], request);
             case t_request_type::RT_GET:
-                return handle_get(path + '/' + target[3]);
+                return handle_get(path + '/' + target[3], request);
             default:
-                return g_server_error_response;
+                return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
         }
-        return g_server_error_response;
+        return HttpResponse(t_response_answer::RT_SERVER_ERROR, t_http_version::HV_1_1);
     }
 private:
-    static std::string handle_post(const std::string& path, const HttpRequest& request)
+    static HttpResponse handle_post(const std::string& path, const HttpRequest& request)
     {
         const auto& headers = request.GetHeaders();
         auto it = headers.find("Content-Length");
         if (it == headers.end())
         {
-            return g_not_found_response;
+            return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
         }
         const size_t size = std::stoi(it->second);
-        std::cout << "Size: " << size << std::endl;
-        std::cout << "Body: " << request.GetBody() << std::endl;
         if (!write_file(path, request.GetBody(), size))
         {
-            return g_not_found_response;
+            return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
         }
-        return "HTTP/1.1 201 Created\r\n\r\n";
+        return HttpResponse(t_response_answer::RT_CREATED, t_http_version::HV_1_1);
     }
-    static std::string handle_get(const std::string& path)
+    static HttpResponse handle_get(const std::string& path, const HttpRequest& request)
     {
+        const auto& headers = request.GetHeaders();
         const std::string file = read_file(path);
         if (file.empty())
         {
-            return g_not_found_response;
+            return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
         }
-        return "HTTP/1.1 200 OK\r\nContent-Type: "
-            "application/octet-stream\r\nContent-Length: " +
-            std::to_string(file.size()) + "\r\n\r\n" + file;
+        HttpResponse response(t_response_answer::RT_OK, t_http_version::HV_1_1);
+        response.SetContentType("application/octet-stream");
+        response.SetContentLength(file.size());
+        auto encoding = headers.find("Accept-Encoding");
+        //TODO: add encoding to server ctx
+        if (encoding != headers.end() && encoding->second == "gzip")
+        {
+            response.SetEncoding("gzip");
+        }
+        response.SetBody(file);
+        return response;
     }
 };
 
 struct EchoHandler
 {
-    static std::string Handle(const HttpRequest& request, const ServerContext& ctx)
+    static HttpResponse Handle(const HttpRequest& request, const ServerContext& ctx)
     {
         const auto& status = request.GetStatus();
         if (status.GetMethod() == t_request_type::RT_GET)
@@ -84,22 +91,27 @@ struct EchoHandler
             const auto& targets = status.GetTarget();
             if (targets.empty() || targets.size() < 4)
             {
-                return g_not_found_response;
+                return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
             }
-            for (const auto& target : targets)
+            HttpResponse response(t_response_answer::RT_OK, t_http_version::HV_1_1);
+            response.SetContentType("text/plain");
+            const auto& headers = request.GetHeaders();
+            auto encoding = headers.find("Accept-Encoding");
+            if (encoding != headers.end() && encoding->second == "gzip")
             {
-                std::cout << "target: " << target << std::endl;
+                response.SetEncoding("gzip");
             }
-            return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " +
-                std::to_string(targets[3].size()) + "\r\n\r\n" + targets[3];
+            response.SetContentLength(targets[3].size());
+            response.SetBody(targets[3]);
+            return response;
         }
-        return g_server_error_response;
+        return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
     }
 };
 
 struct UserAgentHandler
 {
-    static std::string Handle(const HttpRequest& request, const ServerContext& ctx)
+    static HttpResponse Handle(const HttpRequest& request, const ServerContext& ctx)
     {
         const auto& status = request.GetStatus();
         if (status.GetMethod() == t_request_type::RT_GET)
@@ -108,39 +120,56 @@ struct UserAgentHandler
             const auto& userAgent = headers.find("User-Agent");
             if (userAgent == headers.end())
             {
-                return g_not_found_response;
+                return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
             }
-            return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " +
-                std::to_string(userAgent->second.size()) + "\r\n\r\n" +
-                userAgent->second;
+            HttpResponse response(t_response_answer::RT_OK, t_http_version::HV_1_1);
+            response.SetContentType("text/plain");
+            response.SetContentLength(userAgent->second.size());
+            auto encoding = headers.find("Accept-Encoding");
+            if (encoding != headers.end() && encoding->second == "gzip")
+            {
+                response.SetEncoding("gzip");
+            }
+            response.SetBody(userAgent->second);
+            return response;
         }
-        return g_server_error_response;
+        return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
     }
 };
 
 struct HtmlHandler
 {
-    static std::string Handle(const HttpRequest& request, const ServerContext& ctx)
+    static HttpResponse Handle(const HttpRequest& request, const ServerContext& ctx)
     {
         const std::string& path = ctx.GetDirectory();
         if (path.empty())
         {
-            return g_not_found_response;
+            return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
         }
         const auto& status = request.GetStatus();
         const auto& target = status.GetTarget();
-        std::string response = read_file(path + '/' + target[1]);
+        std::string data = read_file(path + '/' + target[1]);
 
-        if (response.empty())
+        if (data.empty())
         {
-            return g_not_found_response;
+            return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
         }
-        return "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-            std::to_string(response.size()) + "\r\n\r\n" + response;
+
+        HttpResponse response(t_response_answer::RT_OK, t_http_version::HV_1_1);
+        response.SetContentType("text/html");
+        response.SetContentLength(data.size());
+        const auto& headers = request.GetHeaders();
+        auto encoding = headers.find("Accept-Encoding");
+        if (encoding != headers.end() && encoding->second == "gzip")
+        {
+            response.SetEncoding("gzip");
+        }
+        response.SetBody(data);
+        return response;
     }
 };
 
-static std::map<std::string, std::function<std::string(const HttpRequest&, const ServerContext&)> >g_router_map =
+static std::map<std::string, std::function<HttpResponse(const HttpRequest&, const ServerContext&)> >g_router_map =
     {
         {"/", RootHandler::Handle},
         {"/echo", EchoHandler::Handle},
@@ -149,13 +178,13 @@ static std::map<std::string, std::function<std::string(const HttpRequest&, const
         {"/test_example.html", HtmlHandler::Handle}
     };
 
-std::string handle_http_request(const HttpRequest& request, const ServerContext& ctx)
+HttpResponse handle_http_request(const HttpRequest& request, const ServerContext& ctx)
 {
     const auto& status = request.GetStatus();
     const auto& target = status.GetTarget();
     if (target.empty())
     {
-        return g_not_found_response;
+        return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
     }
     const auto& headers = request.GetHeaders();
     const std::string key = target[0] + (target.size() > 1 ? target[1] : "");
@@ -164,5 +193,5 @@ std::string handle_http_request(const HttpRequest& request, const ServerContext&
     {
         return route->second(request, ctx);
     }
-    return g_not_found_response;
+    return HttpResponse(t_response_answer::RT_NOT_FOUND, t_http_version::HV_1_1);
 }

@@ -15,8 +15,16 @@ enum class t_request_type
     RT_UNKNOWN
 };
 
+enum class t_http_version
+{
+    HV_1_0 = 0,
+    HV_1_1
+};
+
 t_request_type get_request_type(const std::string& request);
+t_http_version get_version(const std::string& version);
 std::string to_string(t_request_type type);
+std::string to_string(t_http_version type);
 
 class RequestStatus
 {
@@ -31,7 +39,9 @@ public:
         std::string rawTarget;
         ss >> rawTarget;
         m_target = split(rawTarget);
-        ss >> m_version;
+        std::string rawVersion;
+        ss >> rawVersion;
+        m_version = get_version(rawVersion);
     }
     t_request_type GetMethod() const
     {
@@ -41,7 +51,7 @@ public:
     {
         return m_target;
     }
-    std::string GetVersion() const
+    t_http_version GetVersion() const
     {
         return m_version;
     }
@@ -54,13 +64,13 @@ public:
             os << target;
         }
         os << std::endl;
-        os << "Version: " << requestLine.m_version << std::endl;
+        os << "Version: " << to_string(requestLine.m_version) << std::endl;
         return os;
     }
 private:
     t_request_type m_method;
     std::vector<std::string> m_target;
-    std::string m_version;
+    t_http_version m_version;
 };
 
 class HttpRequest {
@@ -76,7 +86,7 @@ public:
             }
             m_request_line = RequestStatus(rawRequest.substr(0, idx));
             m_headers = ParseHeaders(rawRequest.substr(idx + 2));
-            auto end = rawRequest.find_last_of("\r\n\n");
+            auto end = rawRequest.find_last_of("\r\n\r\n");
             if (end != std::string::npos)
             {
                 m_body = rawRequest.substr(end + 1);
@@ -98,10 +108,12 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const HttpRequest& request)
     {
         os << request.m_request_line;
+        std::cout << "HEADERS: " << std::endl;
         for (const auto& header : request.m_headers)
         {
             os << header.first << ": " << header.second << std::endl;
         }
+        std::cout << "END HEADERS" << std::endl;
         return os;
     }
 private:

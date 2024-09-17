@@ -18,7 +18,7 @@ std::string parse_request(const std::string& request, const ServerContext& ctx)
 {
     HttpRequest req(request);
     std::cout << "REQUEST: " << req << std::endl;
-    return handle_http_request(req, ctx);
+    return handle_http_request(req, ctx).str();
 }
 
 std::mutex request_mutex;

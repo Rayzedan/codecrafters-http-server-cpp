@@ -27,3 +27,29 @@ std::string to_string(t_request_type type)
             return "UNKNOWN";
     }
 }
+
+t_http_version get_version(const std::string& version)
+{
+    if (version == "HTTP/1.0")
+    {
+        return t_http_version::HV_1_0;
+    }
+    if (version == "HTTP/1.1")
+    {
+        return t_http_version::HV_1_1;
+    }
+    throw std::invalid_argument("Invalid version");
+}
+
+std::string to_string(t_http_version type)
+{
+    switch (type)
+    {
+        case t_http_version::HV_1_0:
+            return "HTTP/1.0";
+        case t_http_version::HV_1_1:
+            return "HTTP/1.1";
+        default:
+            return "UNKNOWN";
+    }
+}
